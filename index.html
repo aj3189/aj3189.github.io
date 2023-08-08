@@ -1,1 +1,96 @@
-Hello
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Andrew Johnson</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        header {
+            background-color: #35424a;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: left;
+        }
+        .profile-img {
+            border-radius: 50%;
+            width: 300px;
+            height: 300px;
+            object-fit: contain;
+            margin-bottom: 20px;
+            margin: 0 auto;
+            display: block;
+        }
+        .intro {
+            font-size: 1.2em;
+            margin-bottom: 20px;
+        }
+        .social-icons a {
+            color: #35424a;
+            text-decoration: none;
+            margin: 0 10px;
+            font-size: 1.5em;
+        }
+        footer {
+            background-color: #35424a;
+            color: white;
+            text-align: center;
+            padding: 10px;
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Andrew Johnson</h1>
+        <p>Graduate Student</p>
+    </header>
+    <img src="headshot.jpg" alt="Profile Picture" class="profile-img">
+    <div class="container">
+        <div class="intro">
+            <p>Hello! I'm Andrew Johnson, a third year graduate student in the programming languages and verification group at Princeton University. I am advised by Professor David Walker. 
+                I'm generally interested in a variety of problems relating to programming languages and networking. </p>
+
+            <p>I completed my BS in computer science and mathematics at Northeastern University in 2021. There, I did undergraduate research on verification with Dr. Thomas Wahl.</p>
+        </div>
+    
+        <section id="publications">
+            <div class="container">
+                <h2>Publications</h2>
+                <div class="publication">
+                    <p><b>Andrew Johnson, Ryan Beckett, Xiaoqi Chen, Ratul Mahajan, David Walker. Sequence Abstractions for Flexible, Line-Rate Network Monitoring. NSDI 2024 (To Appear).</b></p>
+                </div>
+                <div class="publication">
+                    <p><b>Xiaoqi Chen, Mengying Pan, Andrew Johnson, David Walker. Synthesizing State Machines for Data Planes. SOSR 2022.</b> Won best paper! <a href="SOSRSynthesis.pdf">PDF</a></p>
+                </div>
+                <div class="publication">
+                    <p><b>Andrew Johnson, Thomas Wahl. Delay-Bounded Scheduling Without Delay! CAV 2021</b><a href="CAVJohnsonWahlDelayBounded.pdf">PDF</a></p>
+                </div>
+            </div>
+        </section>
+         
+        <div class="social-icons">
+            <a href="publications.html"><i class="fab fa-publications"></i></a>
+            <a href="https://linkedin.com/in/yourusername"><i class="fab fa-linkedin"></i>LinkedIn</a>
+            <a href="https://github.com/aj3189"><i class="fab fa-github"></i>Github</a>
+        </div>
+
+    </div>
+    <footer>
+        <p>&copy; 2023 Your Name. All rights reserved.</p>
+    </footer>
+</body>
+</html>
