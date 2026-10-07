@@ -7,11 +7,15 @@
  *   guess < line  -> player takes HOME at the line
  *   guess > line  -> player takes AWAY at the line
  *   guess == line -> no pick
+ *
+ * Every request must include user and key matching a row in the Users tab.
+ *
+ * @OnlyCurrentDoc
  */
 
 // All tabs this script touches get this prefix. Other tabs are never modified.
 // Change to '' once you're ready to go live with tabs named Games, Picks, etc.
-var TAB_PREFIX = 'TEST_';
+var TAB_PREFIX = '';
 
 // Tried in order. site.api.espn.com returns 403 to Apps Script's user agent, so the
 // site.web mirror (same JSON) comes first.
@@ -25,7 +29,7 @@ var HEADERS = {
   Games: ['week', 'game_id', 'kickoff_utc', 'away_team', 'home_team', 'home_spread',
           'away_score', 'home_score', 'status', 'ats_winner'],
   Picks: ['submitted_at', 'user', 'week', 'game_id', 'guess', 'pick'],
-  Users: ['user_slug', 'display_name'],
+  Users: ['user_slug', 'display_name', 'key'],
   Stats: ['user', 'display_name', 'scope', 'wins', 'losses', 'pushes', 'win_pct']
 };
 
@@ -33,21 +37,37 @@ var HEADERS = {
 // Setup helpers (run manually from the Apps Script editor)
 // ---------------------------------------------------------------------------
 
-/** Creates the four tabs with headers if they don't exist. Never touches other tabs. */
+/**
+ * Creates the four tabs with headers if they don't exist, and adds any header columns
+ * missing from existing tabs (e.g. Users.key). Never touches other tabs.
+ */
 function setupSheet() {
   Object.keys(HEADERS).forEach(function (name) {
     var sh = getSheet_(name);
     if (sh.getLastRow() === 0) {
       sh.appendRow(HEADERS[name]);
       sh.setFrozenRows(1);
+      return;
     }
+    var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+    HEADERS[name].forEach(function (h) {
+      if (head.indexOf(h) === -1) {
+        head.push(h);
+        sh.getRange(1, head.length).setValue(h);
+      }
+    });
   });
   // Keep game ids and kickoff times as plain text so Sheets doesn't reformat them.
   getSheet_('Games').getRange('B:C').setNumberFormat('@');
   getSheet_('Picks').getRange('D:D').setNumberFormat('@');
+  // Passwords as text, so e.g. "0123" isn't turned into 123.
+  getSheet_('Users').getRange('C:C').setNumberFormat('@');
 }
 
-/** Adds the players to the Users tab (skips any already present). Edit the list as needed. */
+/**
+ * Adds the players to the Users tab (skips any already present). Edit the list as needed,
+ * then type each player's password into the key column; users without one can't log in.
+ */
 function seedUsers() {
   var users = [
     ['andrew', 'Andrew'],
@@ -87,11 +107,9 @@ function setupTriggers() {
 function doGet(e) {
   var p = (e && e.parameter) || {};
   try {
+    if (!authorize_(p.user, p.key)) return json_({ error: 'Unauthorized' });
     if (p.action === 'games') return json_(getGames_(p.week));
-    if (p.action === 'picks') {
-      if (!findUser_(p.user)) return json_({ error: 'Unknown user' });
-      return json_({ picks: getPicks_(p.user, Number(p.week)) });
-    }
+    if (p.action === 'picks') return json_({ picks: getPicks_(String(p.user), Number(p.week)) });
     if (p.action === 'stats') return json_({ stats: readTable_('Stats') });
     return json_({ error: 'Unknown action' });
   } catch (err) {
@@ -107,7 +125,7 @@ function doPost(e) {
   } catch (err) {
     return json_({ error: 'Invalid JSON' });
   }
-  if (!findUser_(body.user)) return json_({ error: 'Unknown user' });
+  if (!authorize_(body.user, body.key)) return json_({ error: 'Unauthorized' });
   if (!Array.isArray(body.picks)) return json_({ error: 'Missing picks' });
 
   var lock = LockService.getScriptLock();
@@ -194,14 +212,24 @@ function savePicks_(user, week, picks) {
 // ESPN sync
 // ---------------------------------------------------------------------------
 
-/** Adds this week's (and next week's) games and freezes each line on first write. */
+/**
+ * Adds the upcoming week's games and freezes each line on first write. Only one week is
+ * loaded so lines aren't frozen a week early.
+ */
 function fetchOdds() {
-  var current = fetchScoreboard_();
-  if (!current) return;
-  var week = current.week && current.week.number;
-  syncEvents_(current.events, week, { insert: true });
-  var next = fetchScoreboard_(week + 1);
-  if (next) syncEvents_(next.events, week + 1, { insert: true });
+  var board = fetchScoreboard_();
+  if (!board) return;
+  var week = board.week && board.week.number;
+  var allFinal = board.events.length && board.events.every(function (ev) {
+    return isFinal_(ev.competitions[0].status.type.name);
+  });
+  if (allFinal) {
+    // ESPN hasn't rolled over to the new week yet.
+    week = week + 1;
+    board = fetchScoreboard_(week);
+    if (!board) return;
+  }
+  syncEvents_(board.events, week, { insert: true });
 }
 
 /**
@@ -422,9 +450,11 @@ function normalizeGame_(g) {
   };
 }
 
-function findUser_(slug) {
-  if (!slug) return null;
-  return readTable_('Users').filter(function (u) { return String(u.user_slug) === String(slug); })[0] || null;
+/** True if slug is a listed user whose (non-blank) key matches. */
+function authorize_(slug, key) {
+  if (!slug || !key) return false;
+  var u = readTable_('Users').filter(function (u) { return String(u.user_slug) === String(slug); })[0];
+  return !!u && String(u.key) !== '' && String(u.key) === String(key);
 }
 
 function isFinal_(status) {

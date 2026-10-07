@@ -39,6 +39,8 @@
             margin-bottom: 10px;
         }
         .help { color: #555; font-size: 0.9em; margin-bottom: 15px; }
+        #login { margin-bottom: 15px; }
+        #login input, #login button { font-size: 1em; padding: 6px; }
         .game {
             background: white;
             border: 1px solid #ddd;
@@ -110,6 +112,11 @@
     <div class="container">
         <div id="message"></div>
 
+        <form id="login" hidden>
+            <label>Password <input type="password" id="password" autocomplete="current-password" required></label>
+            <button type="submit">Log in</button>
+        </form>
+
         <section id="picks-section" hidden>
             <div class="toolbar">
                 <label>Week <select id="week"></select></label>
@@ -138,6 +145,9 @@
         let games = [];
         let currentWeek = null;
         let stats = [];
+        const KEY_STORAGE = 'picks-key-' + user;
+        let key = null;
+        try { key = localStorage.getItem(KEY_STORAGE); } catch (err) {}
 
         function showMessage(text, kind) {
             const el = document.getElementById('message');
@@ -165,7 +175,8 @@
         }
 
         async function api(params) {
-            const res = await fetch(SCRIPT_URL + '?' + new URLSearchParams(params), { cache: 'no-store' });
+            const query = new URLSearchParams(Object.assign({ user, key }, params));
+            const res = await fetch(SCRIPT_URL + '?' + query, { cache: 'no-store' });
             return readJson(res);
         }
 
@@ -333,7 +344,7 @@
                 const res = await fetch(SCRIPT_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ user, week: Number(weekSelect.value), picks: changed })
+                    body: JSON.stringify({ user, key, week: Number(weekSelect.value), picks: changed })
                 });
                 const data = await readJson(res);
                 await loadWeek(Number(weekSelect.value));
@@ -361,15 +372,41 @@
                 showMessage('Missing user. Use your personal link, e.g. picks.html?user=yourname', 'error');
                 return;
             }
-            try {
-                stats = (await api({ action: 'stats' })).stats;
-                const me = stats.find(s => s.user === user);
-                if (me) document.getElementById('greeting').textContent = 'Hi, ' + me.display_name;
-            } catch (err) {
-                stats = [];
-            }
             weekSelect.onchange = () => loadWeek(Number(weekSelect.value));
             submitBtn.onclick = submit;
+            document.getElementById('login').onsubmit = e => {
+                e.preventDefault();
+                key = document.getElementById('password').value;
+                start();
+            };
+            if (key) start();
+            else showLogin('');
+        }
+
+        function showLogin(text) {
+            showMessage(text, text ? 'error' : '');
+            document.getElementById('login').hidden = false;
+            document.getElementById('password').focus();
+        }
+
+        // Checks the password with a stats request, remembers it if valid, then loads the week.
+        async function start() {
+            showMessage('Loading…');
+            try {
+                stats = (await api({ action: 'stats' })).stats;
+            } catch (err) {
+                if (err.message === 'Unauthorized') {
+                    try { localStorage.removeItem(KEY_STORAGE); } catch (e) {}
+                    showLogin('Wrong password for "' + user + '".');
+                } else {
+                    showMessage('Could not load: ' + err.message, 'error');
+                }
+                return;
+            }
+            try { localStorage.setItem(KEY_STORAGE, key); } catch (err) {}
+            document.getElementById('login').hidden = true;
+            const me = stats.find(s => s.user === user);
+            if (me) document.getElementById('greeting').textContent = 'Hi, ' + me.display_name;
             loadWeek(null);
         }
 
