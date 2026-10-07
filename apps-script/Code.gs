@@ -13,7 +13,12 @@
 // Change to '' once you're ready to go live with tabs named Games, Picks, etc.
 var TAB_PREFIX = 'TEST_';
 
-var ESPN_URL = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
+// Tried in order. site.api.espn.com returns 403 to Apps Script's user agent, so the
+// site.web mirror (same JSON) comes first.
+var ESPN_URLS = [
+  'https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard',
+  'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'
+];
 var SEASON_TYPE = 2; // regular season
 
 var HEADERS = {
@@ -223,23 +228,26 @@ function fetchResults() {
 }
 
 function fetchScoreboard_(week) {
-  var url = ESPN_URL + '?seasontype=' + SEASON_TYPE + (week ? '&week=' + week : '');
-  try {
-    var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) {
-      console.error('ESPN ' + res.getResponseCode() + ' for ' + url);
-      return null;
+  var query = '?seasontype=' + SEASON_TYPE + (week ? '&week=' + week : '');
+  for (var i = 0; i < ESPN_URLS.length; i++) {
+    var url = ESPN_URLS[i] + query;
+    try {
+      var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      if (res.getResponseCode() !== 200) {
+        console.error('ESPN ' + res.getResponseCode() + ' for ' + url);
+        continue;
+      }
+      var data = JSON.parse(res.getContentText());
+      if (!data || !Array.isArray(data.events)) {
+        console.error('ESPN response missing events for ' + url);
+        continue;
+      }
+      return data;
+    } catch (err) {
+      console.error('ESPN fetch failed for ' + url + ': ' + err);
     }
-    var data = JSON.parse(res.getContentText());
-    if (!data || !Array.isArray(data.events)) {
-      console.error('ESPN response missing events for ' + url);
-      return null;
-    }
-    return data;
-  } catch (err) {
-    console.error('ESPN fetch failed for ' + url + ': ' + err);
-    return null;
   }
+  return null;
 }
 
 function syncEvents_(events, week, opts) {

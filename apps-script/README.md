@@ -54,6 +54,7 @@ Set `TAB_PREFIX = ''` and redeploy, then run `setupSheet`, `seedUsers` and `fetc
 - **Line freeze:** a game's `home_spread` is written only while it's blank and before kickoff. After that the script never changes it. To override a line, edit the cell by hand.
 - **Missing line:** if ESPN has no line when `fetchOdds` runs, the next `fetchResults` run fills it in. Until then that game can't be picked.
 - **Failures:** if ESPN is down or returns something unexpected, the error is logged (Executions panel) and nothing is written.
+- **ESPN hosts:** `site.api.espn.com` returns 403 to Apps Script, so the script uses the `site.web.api.espn.com` mirror first and only falls back to the original. If both start failing, check `ESPN_URLS` in `Code.gs`.
 - **Season:** this covers the regular season only (`SEASON_TYPE = 2`). Weeks are not tagged by season, so start fresh tabs each year.
 - **No login:** anyone who knows a player's slug can submit as them or read their picks. Good enough for friends, not for money.
 
