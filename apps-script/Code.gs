@@ -164,36 +164,29 @@ function savePicks_(user, week, picks) {
 
   var sh = getSheet_('Picks');
   var data = sh.getDataRange().getValues();
-  var rowByGame = {}; // game_id -> 1-based sheet row for this user/week
+  var picked = {}; // game_ids this user already has a pick for; picks are final
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][1]) === user && Number(data[i][2]) === week) rowByGame[String(data[i][3])] = i + 1;
+    if (String(data[i][1]) === user) picked[String(data[i][3])] = true;
   }
 
   var now = new Date();
-  var saved = [], rejected = [], toDelete = [];
+  var saved = [], rejected = [];
   picks.forEach(function (p) {
     var id = String(p.game_id);
     var g = games[id];
     if (!g || g.week !== week) return rejected.push({ game_id: id, reason: 'Unknown game' });
     if (new Date(g.kickoff_utc) <= now) return rejected.push({ game_id: id, reason: 'Game has started' });
     if (g.home_spread === null) return rejected.push({ game_id: id, reason: 'No line yet' });
+    if (picked[id]) return rejected.push({ game_id: id, reason: 'Already submitted' });
 
-    var row = rowByGame[id];
-    if (p.guess === '' || p.guess === null || p.guess === undefined) {
-      if (row) toDelete.push(row);
-      saved.push({ game_id: id, guess: null, pick: '' });
-      return;
-    }
-    var guess = Number(p.guess);
+    var guess = (p.guess === '' || p.guess === null) ? NaN : Number(p.guess);
     if (!isFinite(guess) || Math.abs(guess) > 60) return rejected.push({ game_id: id, reason: 'Invalid number' });
 
     var pick = sideFor_(guess, g.home_spread);
-    var values = [[now.toISOString(), user, week, id, guess, pick]];
-    if (row) sh.getRange(row, 1, 1, values[0].length).setValues(values);
-    else sh.appendRow(values[0]);
+    sh.appendRow([now.toISOString(), user, week, id, guess, pick]);
+    picked[id] = true;
     saved.push({ game_id: id, guess: guess, pick: pick });
   });
-  toDelete.sort(function (a, b) { return b - a; }).forEach(function (r) { sh.deleteRow(r); });
   return { saved: saved, rejected: rejected };
 }
 
