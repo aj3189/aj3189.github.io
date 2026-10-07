@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>NFL Picks</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        header {
+            background-color: #35424a;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: left;
+        }
+        .message {
+            padding: 10px;
+            background: #fff3cd;
+            border: 1px solid #e0c97a;
+            margin-bottom: 15px;
+        }
+        .message.error { background: #f8d7da; border-color: #e3a1a8; }
+        .message.ok { background: #d4edda; border-color: #9bcfa8; }
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .help { color: #555; font-size: 0.9em; margin-bottom: 15px; }
+        .game {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .game.locked { background: #e9e9e9; color: #777; }
+        .game-top {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .matchup { font-weight: bold; font-size: 1.1em; }
+        .kickoff { color: #666; font-size: 0.9em; }
+        .line { margin: 6px 0; }
+        .entry {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .entry input {
+            width: 70px;
+            font-size: 1em;
+            padding: 6px;
+            text-align: center;
+        }
+        .entry button {
+            font-size: 1em;
+            width: 36px;
+            height: 34px;
+        }
+        .side { font-size: 0.95em; color: #35424a; }
+        .result {
+            display: inline-block;
+            min-width: 24px;
+            text-align: center;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: white;
+        }
+        .result.W { background: #2e7d32; }
+        .result.L { background: #c62828; }
+        .result.P { background: #757575; }
+        #submit {
+            background-color: #35424a;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 1em;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #submit:disabled { background-color: #999; cursor: default; }
+        table { border-collapse: collapse; width: 100%; background: white; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background: #35424a; color: white; }
+        td:first-child, th:first-child { text-align: left; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>NFL Picks</h1>
+        <p id="greeting">Against the spread</p>
+    </header>
+    <div class="container">
+        <div id="message"></div>
+
+        <section id="picks-section" hidden>
+            <div class="toolbar">
+                <label>Week <select id="week"></select></label>
+            </div>
+            <p class="help">Enter the home team's spread as you see it. If your number is lower than the line, you take the home team at the line; if higher, the away team. Matching the line exactly is no pick.</p>
+            <div id="games"></div>
+            <button id="submit">Submit picks</button>
+        </section>
+
+        <section id="leaderboard-section" hidden>
+            <h2>Leaderboard</h2>
+            <table>
+                <thead><tr><th>Player</th><th>W</th><th>L</th><th>P</th><th>Win %</th><th id="week-col">Week</th></tr></thead>
+                <tbody id="leaderboard"></tbody>
+            </table>
+        </section>
+    </div>
+
+    <script>
+        // Apps Script web app URL (Deploy > Manage deployments > Web app URL).
+        const SCRIPT_URL = '';
+
+        const user = new URLSearchParams(location.search).get('user');
+        const weekSelect = document.getElementById('week');
+        const gamesEl = document.getElementById('games');
+        const submitBtn = document.getElementById('submit');
+        let games = [];
+        let currentWeek = null;
+        let stats = [];
+
+        function showMessage(text, kind) {
+            const el = document.getElementById('message');
+            el.innerHTML = '';
+            if (!text) return;
+            const div = document.createElement('div');
+            div.className = 'message' + (kind ? ' ' + kind : '');
+            div.textContent = text;
+            el.appendChild(div);
+        }
+
+        async function api(params) {
+            const res = await fetch(SCRIPT_URL + '?' + new URLSearchParams(params));
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            return data;
+        }
+
+        function signed(n) {
+            return n > 0 ? '+' + n : String(n);
+        }
+
+        function lineText(g) {
+            if (g.home_spread === null) return 'No line yet';
+            if (g.home_spread === 0) return 'Line: pick\'em';
+            return g.home_spread < 0
+                ? 'Line: ' + g.home_team + ' ' + g.home_spread
+                : 'Line: ' + g.away_team + ' ' + signed(-g.home_spread);
+        }
+
+        // Mirrors sideFor_ in Code.gs.
+        function sideText(g, guess) {
+            if (guess === '' || g.home_spread === null || !isFinite(Number(guess))) return '';
+            const n = Number(guess);
+            if (n < g.home_spread) return 'You take ' + g.home_team + ' ' + signed(g.home_spread);
+            if (n > g.home_spread) return 'You take ' + g.away_team + ' ' + signed(-g.home_spread);
+            return 'No pick (matches the line)';
+        }
+
+        function isLocked(g) {
+            return new Date(g.kickoff_utc) <= new Date() || g.home_spread === null;
+        }
+
+        function renderGames(picks) {
+            const byGame = {};
+            picks.forEach(p => { byGame[p.game_id] = p; });
+            gamesEl.innerHTML = '';
+            if (!games.length) {
+                gamesEl.textContent = 'No games loaded for this week yet.';
+            }
+            games.forEach(g => {
+                const pick = byGame[g.game_id];
+                const locked = isLocked(g);
+                const card = document.createElement('div');
+                card.className = 'game' + (locked ? ' locked' : '');
+
+                const top = document.createElement('div');
+                top.className = 'game-top';
+                const matchup = document.createElement('span');
+                matchup.className = 'matchup';
+                matchup.textContent = g.away_team + ' @ ' + g.home_team;
+                if (g.away_score !== null && g.home_score !== null) {
+                    matchup.textContent += '  (' + g.away_score + '-' + g.home_score + ')';
+                }
+                const kickoff = document.createElement('span');
+                kickoff.className = 'kickoff';
+                kickoff.textContent = new Date(g.kickoff_utc).toLocaleString([], {
+                    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+                });
+                top.append(matchup, kickoff);
+
+                const line = document.createElement('div');
+                line.className = 'line';
+                line.textContent = lineText(g);
+
+                const entry = document.createElement('div');
+                entry.className = 'entry';
+                const label = document.createElement('span');
+                label.textContent = g.home_team + ':';
+                const minus = document.createElement('button');
+                minus.type = 'button';
+                minus.textContent = '−';
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.step = '0.5';
+                input.dataset.gameId = g.game_id;
+                input.value = pick ? pick.guess : '';
+                input.dataset.original = input.value;
+                const plus = document.createElement('button');
+                plus.type = 'button';
+                plus.textContent = '+';
+                const side = document.createElement('span');
+                side.className = 'side';
+                const update = () => { side.textContent = sideText(g, input.value); };
+                const step = delta => {
+                    const base = input.value === '' ? g.home_spread : Number(input.value);
+                    input.value = base + delta;
+                    update();
+                };
+                minus.onclick = () => step(-0.5);
+                plus.onclick = () => step(0.5);
+                input.oninput = update;
+                [minus, input, plus].forEach(el => { el.disabled = locked; });
+                entry.append(label, minus, input, plus, side);
+                if (pick && pick.result) {
+                    const badge = document.createElement('span');
+                    badge.className = 'result ' + pick.result;
+                    badge.textContent = pick.result;
+                    entry.append(badge);
+                }
+                update();
+                card.append(top, line, entry);
+                gamesEl.appendChild(card);
+            });
+            submitBtn.disabled = !games.some(g => !isLocked(g));
+        }
+
+        function renderLeaderboard() {
+            const tbody = document.getElementById('leaderboard');
+            const week = Number(weekSelect.value);
+            document.getElementById('week-col').textContent = 'Week ' + week;
+            tbody.innerHTML = '';
+            stats.filter(s => s.scope === 'season').forEach(s => {
+                const wk = stats.find(w => w.user === s.user && w.scope === 'week ' + week);
+                const tr = document.createElement('tr');
+                const cells = [
+                    s.display_name, s.wins, s.losses, s.pushes,
+                    s.win_pct === '' ? '-' : (s.win_pct * 100).toFixed(1) + '%',
+                    wk ? wk.wins + '-' + wk.losses + '-' + wk.pushes : '-'
+                ];
+                cells.forEach(c => {
+                    const td = document.createElement('td');
+                    td.textContent = c;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            document.getElementById('leaderboard-section').hidden = !stats.length;
+        }
+
+        async function loadWeek(week) {
+            showMessage('Loading…');
+            try {
+                const params = { action: 'games' };
+                if (week) params.week = week;
+                const data = await api(params);
+                games = data.games;
+                if (!week) {
+                    currentWeek = data.week;
+                    weekSelect.innerHTML = '';
+                    data.weeks.forEach(w => {
+                        const opt = document.createElement('option');
+                        opt.value = w;
+                        opt.textContent = w;
+                        weekSelect.appendChild(opt);
+                    });
+                    weekSelect.value = currentWeek;
+                }
+                const picks = data.week ? (await api({ action: 'picks', user, week: data.week })).picks : [];
+                renderGames(picks);
+                renderLeaderboard();
+                document.getElementById('picks-section').hidden = false;
+                showMessage('');
+            } catch (err) {
+                showMessage('Could not load games: ' + err.message, 'error');
+            }
+        }
+
+        async function submit() {
+            const changed = [...gamesEl.querySelectorAll('input:not(:disabled)')]
+                .filter(i => i.value !== i.dataset.original)
+                .map(i => ({ game_id: i.dataset.gameId, guess: i.value === '' ? '' : Number(i.value) }));
+            if (!changed.length) {
+                showMessage('No changes to submit.');
+                return;
+            }
+            submitBtn.disabled = true;
+            showMessage('Submitting…');
+            try {
+                const res = await fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify({ user, week: Number(weekSelect.value), picks: changed })
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                await loadWeek(Number(weekSelect.value));
+                if (data.rejected.length) {
+                    const names = data.rejected.map(r => {
+                        const g = games.find(x => x.game_id === r.game_id);
+                        return (g ? g.away_team + ' @ ' + g.home_team : r.game_id) + ' (' + r.reason + ')';
+                    });
+                    showMessage('Saved ' + data.saved.length + '. Not saved: ' + names.join(', '), 'error');
+                } else {
+                    showMessage('Saved ' + data.saved.length + ' pick' + (data.saved.length === 1 ? '' : 's') + '.', 'ok');
+                }
+            } catch (err) {
+                showMessage('Submit failed: ' + err.message, 'error');
+                submitBtn.disabled = false;
+            }
+        }
+
+        async function init() {
+            if (!SCRIPT_URL) {
+                showMessage('Picks are not set up yet.', 'error');
+                return;
+            }
+            if (!user) {
+                showMessage('Missing user. Use your personal link, e.g. picks.html?user=yourname', 'error');
+                return;
+            }
+            try {
+                stats = (await api({ action: 'stats' })).stats;
+                const me = stats.find(s => s.user === user);
+                if (me) document.getElementById('greeting').textContent = 'Hi, ' + me.display_name;
+            } catch (err) {
+                stats = [];
+            }
+            weekSelect.onchange = () => loadWeek(Number(weekSelect.value));
+            submitBtn.onclick = submit;
+            loadWeek(null);
+        }
+
+        init();
+    </script>
+</body>
+</html>

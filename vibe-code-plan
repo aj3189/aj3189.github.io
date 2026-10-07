@@ -1,0 +1,57 @@
+# NFL ATS Picks: Build Plan
+
+## Goal
+Add a page to my existing website where a few friends submit NFL picks against the spread. Data lives in a Google Sheet. A Google Apps Script web app is the backend. No login; each person has their own URL (e.g. `/picks?user=mike`).
+
+## Architecture
+- **Frontend:** one new page in this repo, matching the existing site's stack and styling.
+- **Backend:** Google Apps Script bound to the sheet, deployed as a web app ("Execute as: Me", "Who has access: Anyone").
+Here is the link to the google spreadsheet. It should have permissions to be edited by anyone. 
+https://docs.google.com/spreadsheets/d/17WYua_IqVvIcLj6ZhfOeYM01d7TAq4imrS2Iv_BRSTI/edit?gid=1827682881#gid=1827682881
+- **Odds:** First look and see if the espn scoreboard has the odds in the response. If so use those, if not we can find something else.
+
+- **Results:** ESPN scoreboard (`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week=N`).
+
+## Sheet tabs
+1. **Games**: week, game_id, kickoff_utc, away_team, home_team, home_spread, away_score, home_score, status, ats_winner (home/away/push)
+2. **Picks**: submitted_at, user, week, game_id, pick (home/away). One row per user+game; resubmitting overwrites.
+3. **Users**: user_slug, display_name. Reject any user not listed.
+4. **Stats**: per user: wins, losses, pushes, win %, by week and season. Formulas or a script-generated table, whichever is simpler.
+
+## Apps Script (`Code.gs`)
+- `doGet(e)`:
+  - `action=games&week=N` returns that week's games with spreads.
+  - `action=picks&user=X&week=N` returns that user's picks.
+  - `action=stats` returns the Stats table.
+- `doPost(e)`: body is JSON `{user, week, picks:[{game_id, pick}]}`.
+  - Validate the user.
+  - Reject picks for games whose `kickoff_utc` has passed.
+  - Upsert rows inside `LockService`.
+- `fetchOdds()`: pull DraftKings spreads and write upcoming games to Games. Freeze the spread after first write; don't update lines once set.
+- `fetchResults()`: pull ESPN scores for completed games, compute `ats_winner`, update Games.
+- Time-driven triggers:
+  - `fetchOdds` on Wednesdays at 10am ET.
+  - `fetchResults` daily at 9am ET, plus Sunday/Monday/Thursday night.
+- Return JSON via `ContentService` with MIME type JSON.
+
+## Frontend page
+- Read `user` from the query string; read the week from a selector, defaulting to the current week.
+- List games: away @ home, spread, kickoff time. Each team is a tap target to pick.
+- Lock and grey out games past kickoff.
+- Show existing picks, plus graded results (W/L/P) once games finish.
+- Submit button POSTs with `Content-Type: text/plain` (avoids CORS preflight).
+- Add a simple leaderboard section from `action=stats`.
+- Put the Apps Script URL in one config constant.
+
+## Deliverables
+1. The frontend page in this repo.
+2. `apps-script/Code.gs` plus `apps-script/README.md` with setup steps:
+   - Creating the sheet and tabs.
+   - Pasting the script and setting the `ODDS_API_KEY` script property.
+   - Installing triggers (provide a `setupTriggers()` function).
+   - Deploying the web app and copying its URL into the frontend config.
+3. A `seedUsers()` helper to populate the Users tab.
+
+## Constraints
+- Keep it minimal; no frameworks beyond what the site already uses.
+- Handle ESPN or Odds API failures gracefully (log, don't wipe data).
