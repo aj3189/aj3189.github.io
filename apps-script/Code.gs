@@ -111,6 +111,7 @@ function doGet(e) {
     if (p.action === 'games') return json_(getGames_(p.week));
     if (p.action === 'picks') return json_({ picks: getPicks_(String(p.user), Number(p.week)) });
     if (p.action === 'stats') return json_({ stats: readTable_('Stats') });
+    if (p.action === 'group') return json_(getGroup_(String(p.user), p.week));
     return json_({ error: 'Unknown action' });
   } catch (err) {
     console.error(err);
@@ -174,6 +175,48 @@ function getPicks_(user, week) {
         result: g ? grade_(pick, g.ats_winner) : ''
       };
     });
+}
+
+/**
+ * Everyone's picks for a week, per game. A game's picks are included only once the viewer
+ * has picked it or it has kicked off, so picks stay blind. waiting_on lists players who can
+ * log in but haven't picked the game.
+ */
+function getGroup_(viewer, weekParam) {
+  var data = getGames_(weekParam);
+  var names = {}, active = [];
+  readTable_('Users').forEach(function (u) {
+    var slug = String(u.user_slug);
+    names[slug] = String(u.display_name || slug);
+    if (String(u.key) !== '') active.push(slug);
+  });
+  var byGame = {};
+  readTable_('Picks').forEach(function (r) {
+    if (Number(r.week) !== data.week) return;
+    var id = String(r.game_id);
+    (byGame[id] = byGame[id] || []).push(r);
+  });
+
+  var now = new Date();
+  var games = data.games.map(function (g) {
+    var rows = byGame[g.game_id] || [];
+    var pickedBy = rows.map(function (r) { return String(r.user); });
+    var out = {
+      game: g,
+      revealed: new Date(g.kickoff_utc) <= now || pickedBy.indexOf(viewer) !== -1,
+      waiting_on: active.filter(function (u) { return pickedBy.indexOf(u) === -1; })
+                        .map(function (u) { return names[u]; })
+    };
+    if (out.revealed) {
+      out.picks = rows.filter(function (r) { return r.guess !== '' && isFinite(Number(r.guess)); })
+        .map(function (r) {
+          var guess = Number(r.guess);
+          return { name: names[String(r.user)] || String(r.user), guess: guess, pick: sideFor_(guess, g.home_spread) };
+        });
+    }
+    return out;
+  });
+  return { week: data.week, games: games };
 }
 
 function savePicks_(user, week, picks) {

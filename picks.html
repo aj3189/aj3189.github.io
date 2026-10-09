@@ -98,6 +98,15 @@
             cursor: pointer;
         }
         #submit:disabled { background-color: #999; cursor: default; }
+        #group-section { margin-top: 30px; }
+        .game.agree { border-left: 5px solid #2e7d32; }
+        .verdict { font-weight: bold; margin: 6px 0; }
+        .verdict.agree { color: #2e7d32; }
+        .verdict.split { color: #c62828; }
+        .quality { color: #555; font-size: 0.9em; }
+        .game table { margin-top: 6px; font-size: 0.95em; }
+        .game td, .game th { padding: 4px 8px; }
+        .waiting { color: #777; font-size: 0.9em; margin-top: 6px; }
         table { border-collapse: collapse; width: 100%; background: white; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
         th { background: #35424a; color: white; }
@@ -124,6 +133,13 @@
             <p class="help">Enter the home team's spread as you see it. If your number is lower than the line, you take the home team at the line; if higher, the away team. Matching the line exactly is no pick. Lines stay hidden until you submit, and submitted picks are final.</p>
             <div id="games"></div>
             <button id="submit">Submit picks</button>
+        </section>
+
+        <section id="group-section" hidden>
+            <h2>Group picks</h2>
+            <p class="help">Everyone's numbers, sorted by edge: how far the group's average is from the line. When everyone who entered a number is on the same side, that's a group pick. A game's picks show once you've picked it or it kicks off.</p>
+            <p id="group-summary"></p>
+            <div id="group"></div>
         </section>
 
         <section id="leaderboard-section" hidden>
@@ -205,6 +221,142 @@
             return new Date(g.kickoff_utc) <= new Date() || g.home_spread === null;
         }
 
+        // Matchup (with score once available) and kickoff time.
+        function gameTop(g) {
+            const top = document.createElement('div');
+            top.className = 'game-top';
+            const matchup = document.createElement('span');
+            matchup.className = 'matchup';
+            matchup.textContent = g.away_team + ' @ ' + g.home_team;
+            if (g.away_score !== null && g.home_score !== null) {
+                matchup.textContent += '  (' + g.away_score + '-' + g.home_score + ')';
+            }
+            const kickoff = document.createElement('span');
+            kickoff.className = 'kickoff';
+            kickoff.textContent = new Date(g.kickoff_utc).toLocaleString([], {
+                weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+            });
+            top.append(matchup, kickoff);
+            return top;
+        }
+
+        function sideLabel(g, side) {
+            if (side === 'home') return g.home_team + ' ' + signed(g.home_spread);
+            if (side === 'away') return g.away_team + ' ' + signed(-g.home_spread);
+            return 'No pick';
+        }
+
+        // Mirrors grade_ in Code.gs.
+        function grade(side, atsWinner) {
+            if (!atsWinner || (side !== 'home' && side !== 'away')) return '';
+            return atsWinner === 'push' ? 'P' : atsWinner === side ? 'W' : 'L';
+        }
+
+        function resultBadge(result) {
+            const badge = document.createElement('span');
+            badge.className = 'result ' + result;
+            badge.textContent = result;
+            return badge;
+        }
+
+        // Adds the average guess, edge vs the line, and whether everyone agrees to each game.
+        function analyzeGroup(rows) {
+            return rows.map(r => {
+                const g = r.game;
+                const picks = r.picks || [];
+                const a = { g, revealed: r.revealed, picks, waiting: r.waiting_on };
+                if (!r.revealed || !picks.length || g.home_spread === null) return a;
+                a.avg = picks.reduce((s, p) => s + p.guess, 0) / picks.length;
+                a.edge = Math.abs(a.avg - g.home_spread);
+                const side = picks[0].pick;
+                a.agree = picks.length >= 2 && (side === 'home' || side === 'away') &&
+                    picks.every(p => p.pick === side);
+                if (a.agree) {
+                    a.side = side;
+                    a.result = grade(side, g.ats_winner);
+                }
+                return a;
+            });
+        }
+
+        function renderGroup(rows) {
+            const el = document.getElementById('group');
+            el.innerHTML = '';
+            const list = analyzeGroup(rows).sort((x, y) => {
+                const ex = x.edge === undefined ? -1 : x.edge;
+                const ey = y.edge === undefined ? -1 : y.edge;
+                return ey - ex || (x.g.kickoff_utc < y.g.kickoff_utc ? -1 : 1);
+            });
+
+            const agreed = list.filter(a => a.agree);
+            const rec = { W: 0, L: 0, P: 0 };
+            agreed.forEach(a => { if (a.result) rec[a.result]++; });
+            document.getElementById('group-summary').textContent = agreed.length
+                ? agreed.length + ' group pick' + (agreed.length === 1 ? '' : 's') +
+                  (rec.W + rec.L + rec.P ? ' (' + rec.W + '-' + rec.L + '-' + rec.P + ')' : '') + '.'
+                : 'No group picks yet.';
+
+            list.forEach(a => {
+                const g = a.g;
+                const card = document.createElement('div');
+                card.className = 'game' + (a.agree ? ' agree' : '');
+                card.appendChild(gameTop(g));
+
+                if (!a.revealed) {
+                    const p = document.createElement('div');
+                    p.className = 'line';
+                    p.textContent = 'Pick this game to see the group.';
+                    card.appendChild(p);
+                } else {
+                    const line = document.createElement('div');
+                    line.className = 'line';
+                    line.textContent = lineText(g);
+                    card.appendChild(line);
+                }
+
+                if (a.avg !== undefined) {
+                    const verdict = document.createElement('div');
+                    if (a.agree) {
+                        verdict.className = 'verdict agree';
+                        verdict.textContent = 'Group pick: ' + sideLabel(g, a.side) + ' ';
+                        if (a.result) verdict.appendChild(resultBadge(a.result));
+                    } else if (a.picks.length < 2) {
+                        verdict.className = 'verdict';
+                        verdict.textContent = 'Only one pick';
+                    } else {
+                        verdict.className = 'verdict split';
+                        verdict.textContent = 'Split';
+                    }
+                    const q = document.createElement('div');
+                    q.className = 'quality';
+                    const lean = a.avg < g.home_spread ? g.home_team : a.avg > g.home_spread ? g.away_team : '';
+                    q.textContent = 'Average ' + g.home_team + ' ' + signed(+a.avg.toFixed(2)) +
+                        ' · edge ' + (+a.edge.toFixed(2)) + (lean ? ' toward ' + lean : '');
+
+                    const table = document.createElement('table');
+                    a.picks.forEach(p => {
+                        const tr = document.createElement('tr');
+                        [p.name, g.home_team + ' ' + signed(p.guess), sideLabel(g, p.pick)].forEach(c => {
+                            const td = document.createElement('td');
+                            td.textContent = c;
+                            tr.appendChild(td);
+                        });
+                        table.appendChild(tr);
+                    });
+                    card.append(verdict, q, table);
+                }
+
+                if (a.waiting.length && new Date(g.kickoff_utc) > new Date()) {
+                    const w = document.createElement('div');
+                    w.className = 'waiting';
+                    w.textContent = 'Waiting on ' + a.waiting.join(', ');
+                    card.appendChild(w);
+                }
+                el.appendChild(card);
+            });
+            document.getElementById('group-section').hidden = !list.length;
+        }
+
         function renderGames(picks) {
             const byGame = {};
             picks.forEach(p => { byGame[p.game_id] = p; });
@@ -219,21 +371,7 @@
                 const revealed = !!pick || new Date(g.kickoff_utc) <= new Date();
                 const card = document.createElement('div');
                 card.className = 'game' + (locked ? ' locked' : '');
-
-                const top = document.createElement('div');
-                top.className = 'game-top';
-                const matchup = document.createElement('span');
-                matchup.className = 'matchup';
-                matchup.textContent = g.away_team + ' @ ' + g.home_team;
-                if (g.away_score !== null && g.home_score !== null) {
-                    matchup.textContent += '  (' + g.away_score + '-' + g.home_score + ')';
-                }
-                const kickoff = document.createElement('span');
-                kickoff.className = 'kickoff';
-                kickoff.textContent = new Date(g.kickoff_utc).toLocaleString([], {
-                    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
-                });
-                top.append(matchup, kickoff);
+                const top = gameTop(g);
 
                 const line = document.createElement('div');
                 line.className = 'line';
@@ -265,12 +403,7 @@
                 plus.onclick = () => step(0.5);
                 [minus, input, plus].forEach(el => { el.disabled = locked; });
                 entry.append(label, minus, input, plus, side);
-                if (pick && pick.result) {
-                    const badge = document.createElement('span');
-                    badge.className = 'result ' + pick.result;
-                    badge.textContent = pick.result;
-                    entry.append(badge);
-                }
+                if (pick && pick.result) entry.append(resultBadge(pick.result));
                 card.append(top, line, entry);
                 gamesEl.appendChild(card);
             });
@@ -318,8 +451,12 @@
                     });
                     weekSelect.value = currentWeek;
                 }
-                const picks = data.week ? (await api({ action: 'picks', user, week: data.week })).picks : [];
+                const [picks, group] = data.week ? await Promise.all([
+                    api({ action: 'picks', user, week: data.week }).then(r => r.picks),
+                    api({ action: 'group', week: data.week }).then(r => r.games)
+                ]) : [[], []];
                 renderGames(picks);
+                renderGroup(group);
                 renderLeaderboard();
                 document.getElementById('picks-section').hidden = false;
                 showMessage('');

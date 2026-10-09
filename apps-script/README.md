@@ -63,4 +63,5 @@ Every request includes `user` and `key` (query parameters for GET, JSON fields f
 - `GET ?action=games[&week=N]`: `{week, weeks, games}`. If `week` is omitted, returns the current week (the earliest week with an unfinished game).
 - `GET ?action=picks&week=N`: `{picks: [{game_id, guess, pick, result}]}`. `result` is `W`, `L`, `P` or empty.
 - `GET ?action=stats`: `{stats: [...]}`, the rows of the Stats tab.
+- `GET ?action=group[&week=N]`: `{week, games: [{game, revealed, waiting_on, picks}]}`, everyone's picks per game. `picks` (`[{name, guess, pick}]`) is included only when `revealed`: the requesting user has picked that game or it has kicked off. `waiting_on` lists display names of players with a password who haven't picked it.
 - `POST` with a `text/plain` JSON body `{user, key, week, picks: [{game_id, guess}]}`. Games already picked by that user are rejected as `Already submitted`. Returns `{saved, rejected: [{game_id, reason}]}`.
